@@ -441,3 +441,27 @@ still reads the column, so it explains the deploy-then-drop sequence and does no
   other sqlc engines. The `Statement` model and rule registry are engine-keyed so MySQL can be added
   later with `sqlc-dev/marino` (Apache-2.0) without restructuring.
 - Custom user rules (CEL like sqlc vet) — a natural v2 once the statement model is stable.
+
+## Status (2026-09-26)
+
+All seven phases are implemented and committed on `main`:
+
+| Phase | State |
+|---|---|
+| 0 flake.nix | done; `nix build`, `nix develop`, `devenv up` (Postgres 16 for tests) |
+| 1 parsing + migration files | done; oliphant (Postgres), meyer (SQLite) |
+| 2 rule engine + Postgres rules | done; 22 rules incl. 2 opt-in |
+| 3 config + sqlc discovery | done; `safe_sql init`, golden CLI tests |
+| 4 verify | done; Postgres (URL or container) and SQLite (temp file), delegating to `sqlc vet` |
+| 5 distribution | done; goreleaser, Action, pre-commit, Dockerfile, CI + release workflows, README |
+| 6 fix + AI + PR flow | done; deterministic fixers, Claude-backed proposals with validation, `github` delivery subcommands, `mode: ai-fix` in the Action |
+| 7 SQLite | done; 7 SQLite-specific rules + common rules, verify support |
+
+Not yet done (needs the repository to be published):
+- Tag `v1.0.0` and `v1` so `uses: trishtzy/safe_sql@v1` and the release
+  download in `action.yml` resolve; push to GitHub so CI runs.
+- One manual `safe_sql fix --ai` run against the real Anthropic API on
+  `testdata/ai_fake/migrations` to confirm the prompt yields valid proposals
+  (the loop is exercised in CI with the fake provider only).
+- Server-side refusal fallbacks are not enabled on the AI provider; add them
+  if refusals show up in practice.
