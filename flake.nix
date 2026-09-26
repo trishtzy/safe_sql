@@ -23,7 +23,7 @@
           subPackages = [ "cmd/safe_sql" ];
           # Update after changing go.mod: set to "" (or lib.fakeHash), run
           # `nix build`, and copy the hash from the "got:" line.
-          vendorHash = "sha256-LKDVO/OnoxBMf9LM/948JINGH8twMCpYxNqtARrzQIk=";
+          vendorHash = "sha256-RPl3OkMaEpHJ5TPmPQbIG96BIF2kTbrRKGes6lwQ2O8=";
           ldflags = [ "-s" "-w" "-X github.com/trishtzy/safe_sql/internal/cli.Version=${self.shortRev or "dirty"}" ];
           meta = with lib; {
             description = "Lint SQL migrations for operations that lock tables or break running apps";

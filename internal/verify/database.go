@@ -2,13 +2,16 @@ package verify
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	_ "github.com/ncruces/go-sqlite3/driver"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
@@ -46,6 +49,8 @@ func openDatabase(ctx context.Context, opts Options) (database, func(), error) {
 	switch opts.Package.Engine {
 	case sqlparse.EnginePostgres:
 		return openPostgres(ctx, opts)
+	case sqlparse.EngineSQLite:
+		return openSQLite(opts)
 	default:
 		return nil, nil, fmt.Errorf("verify does not support engine %q yet", opts.Package.Engine)
 	}
@@ -124,6 +129,46 @@ func withDatabase(uri, name string) (string, error) {
 	}
 	u.Path = "/" + name
 	return u.String(), nil
+}
+
+type sqliteDB struct {
+	db  *sql.DB
+	uri string
+}
+
+func (s *sqliteDB) Exec(_ context.Context, q string) error {
+	_, err := s.db.Exec(q)
+	return err
+}
+func (s *sqliteDB) URI() string  { return s.uri }
+func (s *sqliteDB) Close() error { return s.db.Close() }
+
+// openSQLite creates a temp file database. SQLite needs no server, so
+// DatabaseURL is only honoured when it points at a file the user wants to
+// inspect afterwards.
+func openSQLite(opts Options) (database, func(), error) {
+	path := opts.DatabaseURL
+	cleanup := func() {}
+	if path == "" {
+		f, err := os.CreateTemp("", "safe_sql-verify-*.db")
+		if err != nil {
+			return nil, nil, err
+		}
+		path = f.Name()
+		_ = f.Close()
+		cleanup = func() { _ = os.Remove(path) }
+	}
+	db, err := sql.Open("sqlite3", "file:"+path)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	if err := db.Ping(); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("open sqlite %s: %w", path, err)
+	}
+	s := &sqliteDB{db: db, uri: "file:" + path}
+	return s, func() { _ = s.Close(); cleanup() }, nil
 }
 
 // applyMigrations executes every up statement of every file in order and

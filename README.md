@@ -86,6 +86,13 @@ guidance for a rule by triggering it.
 | `require-concurrent-index-drop` | postgresql | error (opt-in) | Dropping an index without CONCURRENTLY blocks reads and writes (opt-in) |
 | `require-lock-timeout` | postgresql | warning (opt-in) | Migration files with DDL should set lock_timeout (opt-in) |
 | `set-not-null-without-check` | postgresql | error | SET NOT NULL scans the table under an exclusive lock unless a validated check exists |
+| `sqlite-add-column-restrictions` | sqlite | error | ADD COLUMN forms that SQLite rejects at run time |
+| `sqlite-drop-column-restrictions` | sqlite | error | DROP COLUMN fails on old SQLite or when the column is indexed, referenced, or used by a view/trigger |
+| `sqlite-pragma-in-transaction` | sqlite | error | PRAGMA foreign_keys / journal_mode are silently ignored inside a transaction |
+| `sqlite-rebuild-locks-database` | sqlite | warning | A table rebuild holds SQLite's single write lock for the whole copy |
+| `sqlite-rename-column-version` | sqlite | error | RENAME COLUMN needs SQLite 3.25+ |
+| `sqlite-table-rebuild` | sqlite | error | Table rebuild is missing a step of SQLite's documented procedure |
+| `sqlite-unsupported-alter` | sqlite | error | SQLite cannot execute this ALTER TABLE form; rebuild the table instead |
 
 Notes:
 
@@ -100,8 +107,13 @@ Notes:
 - `add-column-volatile-default` knows the volatility of common functions;
   an unknown function produces a warning rather than an error.
 - Version-gated advice (constant defaults on Postgres < 11, NOT NULL via check
-  constraint on Postgres >= 12) uses `target_version`; when unset, the latest
-  release is assumed.
+  constraint on Postgres >= 12, DROP COLUMN on SQLite >= 3.35) uses
+  `target_version`; when unset, the latest release is assumed.
+- SQLite has no strong_migrations equivalent, so its rules come from SQLite's
+  own ALTER TABLE restrictions: forms the engine rejects at run time (which
+  sqlc happens to accept for schema evolution), the documented table-rebuild
+  procedure with its transaction, foreign-key and recreate-everything steps,
+  and pragmas that are silently ignored inside a transaction.
 
 ### Skipping a check
 
@@ -161,7 +173,8 @@ proposed schema, but needs sqlc Cloud. `safe_sql verify` does the same locally:
    queries that are actually deployed.
 2. Applies every proposed migration, statement by statement, to a scratch
    database: `--database-url` (a throwaway database is created on that server),
-   or a Postgres container started through Docker.
+   or a Postgres container started through Docker. SQLite projects need
+   neither: a temporary file database is used.
 3. Writes a temporary `sqlc.yaml` and runs `sqlc vet` with the built-in
    `sqlc/db-prepare` rule, so sqlc's own query parsing and parameter handling
    are used unchanged.

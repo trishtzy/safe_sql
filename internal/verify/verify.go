@@ -167,7 +167,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		} else {
 			b.SQL = querySQL(qfile, b.QueryName)
 		}
-		b.MigrationFile = Attribute(b.SQL, newFiles, loaded, cat)
+		b.MigrationFile = AttributeEngine(opts.Package.Engine, b.SQL, newFiles, loaded, cat)
 	}
 
 	// 5. Lint the new files and fold breakages into the same result shape.
@@ -253,12 +253,17 @@ func ParseVetOutput(out, prefix, root string) []Breakage {
 // query outranks one that merely touches a table named in the query; ties go
 // to the later file.
 func Attribute(querySQL string, newFiles []string, files []*migrate.File, cat *catalog.Catalog) string {
+	return AttributeEngine(sqlparse.EnginePostgres, querySQL, newFiles, files, cat)
+}
+
+// AttributeEngine is Attribute for a specific engine.
+func AttributeEngine(engine sqlparse.Engine, querySQL string, newFiles []string, files []*migrate.File, cat *catalog.Catalog) string {
 	q := strings.ToLower(querySQL)
 	isNew := map[string]bool{}
 	for _, f := range newFiles {
 		isNew[f] = true
 	}
-	parser, err := sqlparse.ForEngine(sqlparse.EnginePostgres)
+	parser, err := sqlparse.ForEngine(engine)
 	if err != nil {
 		return ""
 	}

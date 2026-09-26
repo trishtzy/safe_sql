@@ -185,9 +185,11 @@ type ColumnDef struct {
 	// Serial is set for serial/smallserial/bigserial pseudo-types.
 	Serial bool
 	// Generated is "stored" or "virtual" for GENERATED ALWAYS AS (expr), else "".
-	Generated  string
-	PrimaryKey bool
-	Unique     bool
+	Generated string
+	// GeneratedExpr is the generation expression, when the parser exposes it.
+	GeneratedExpr *Expr
+	PrimaryKey    bool
+	Unique        bool
 	// References is the inline REFERENCES target, if any.
 	References *TableName
 	// Constraints are inline CHECK/FK/etc. constraints attached to the column.

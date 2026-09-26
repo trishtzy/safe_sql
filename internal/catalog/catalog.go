@@ -59,9 +59,10 @@ type View struct {
 
 // Trigger is a trigger on a table.
 type Trigger struct {
-	Name      string
-	Table     sqlparse.TableName
-	CreatedIn string
+	Name       string
+	Table      sqlparse.TableName
+	Definition string
+	CreatedIn  string
 }
 
 // New returns an empty catalog.
@@ -158,6 +159,80 @@ func (t *Table) IndexedColumns(col string) bool {
 		return true
 	}
 	return false
+}
+
+// ReferencedBy lists tables whose foreign keys point at column col of t.
+func (c *Catalog) ReferencedBy(t sqlparse.TableName, col string) []string {
+	var out []string
+	for _, other := range c.tables {
+		for _, cn := range other.Constraints {
+			if cn.Kind != sqlparse.ConstraintForeignKey || cn.References == nil || cn.References.Key() != t.Key() {
+				continue
+			}
+			for _, rc := range cn.RefColumns {
+				if strings.EqualFold(rc, col) {
+					out = append(out, other.Name.String())
+				}
+			}
+		}
+	}
+	return out
+}
+
+// ViewsMentioning lists views whose definition contains col as a word.
+func (c *Catalog) ViewsMentioning(col string) []string {
+	var out []string
+	for _, v := range c.views {
+		if mentionsWord(v.Definition, col) {
+			out = append(out, v.Name)
+		}
+	}
+	return out
+}
+
+// TriggersMentioning lists triggers on t whose body mentions col as a word.
+func (c *Catalog) TriggersMentioning(t sqlparse.TableName, col string) []string {
+	var out []string
+	for _, tr := range c.triggers {
+		if tr.Table.Key() == t.Key() && mentionsWord(tr.Definition, col) {
+			out = append(out, tr.Name)
+		}
+	}
+	return out
+}
+
+// GeneratedColumnsUsing lists generated columns of t whose expression
+// mentions col.
+func (t *Table) GeneratedColumnsUsing(col string) []string {
+	var out []string
+	for _, c := range t.Columns {
+		if c.Def.GeneratedExpr != nil && mentionsWord(c.Def.GeneratedExpr.Raw, col) {
+			out = append(out, c.Name)
+		}
+	}
+	return out
+}
+
+func mentionsWord(text, word string) bool {
+	if word == "" {
+		return false
+	}
+	lower, w := strings.ToLower(text), strings.ToLower(word)
+	for i := 0; i+len(w) <= len(lower); i++ {
+		if lower[i:i+len(w)] != w {
+			continue
+		}
+		before := i == 0 || !isIdent(lower[i-1])
+		after := i+len(w) == len(lower) || !isIdent(lower[i+len(w)])
+		if before && after {
+			return true
+		}
+	}
+	return false
+}
+
+func isIdent(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
 }
 
 func normalizeExpr(s string) string {
@@ -281,7 +356,7 @@ func (c *Catalog) Apply(st *sqlparse.Statement, file string) {
 	case sqlparse.KindDropView:
 		delete(c.views, strings.ToLower(st.View.Name))
 	case sqlparse.KindCreateTrigger:
-		c.triggers[strings.ToLower(st.Trigger.Name)] = &Trigger{Name: st.Trigger.Name, Table: st.Trigger.Table, CreatedIn: file}
+		c.triggers[strings.ToLower(st.Trigger.Name)] = &Trigger{Name: st.Trigger.Name, Table: st.Trigger.Table, Definition: st.Trigger.Definition, CreatedIn: file}
 	case sqlparse.KindDropTrigger:
 		delete(c.triggers, strings.ToLower(st.Trigger.Name))
 	}

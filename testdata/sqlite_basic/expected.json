@@ -1,0 +1,82 @@
+{
+  "findings": [
+    {
+      "file": "db/migrations/0002_bad.sql",
+      "line": 2,
+      "rule": "sqlite-add-column-restrictions",
+      "severity": "error",
+      "message": "adding column users.created fails on SQLite: non-constant DEFAULT CURRENT_TIMESTAMP",
+      "guidance": "SQLite's ADD COLUMN cannot: declare PRIMARY KEY or UNIQUE; use a\nnon-constant default (CURRENT_TIMESTAMP, expressions in parentheses); be NOT\nNULL without a non-NULL default; be a STORED generated column; or REFERENCE\nanother table while having a non-NULL default when foreign keys are on.\n\nEither relax the definition (add the column nullable, backfill, then treat\nNOT NULL in the application) or rebuild the table with the column in its\nCREATE TABLE (see sqlite-unsupported-alter for the procedure).",
+      "statement": "ALTER TABLE users ADD COLUMN created TEXT DEFAULT CURRENT_TIMESTAMP"
+    },
+    {
+      "file": "db/migrations/0002_bad.sql",
+      "line": 3,
+      "rule": "sqlite-unsupported-alter",
+      "severity": "error",
+      "message": "ALTER TABLE form SQLite does not support: near \"TYPE\": syntax error",
+      "guidance": "SQLite's ALTER TABLE supports only RENAME TO, RENAME COLUMN, ADD COLUMN and\nDROP COLUMN. Changing a column's type or constraints, or adding a table\nconstraint, needs the documented rebuild procedure inside one transaction:\n\n  PRAGMA foreign_keys = OFF;         -- before BEGIN; a no-op inside a transaction\n  BEGIN;\n  CREATE TABLE users_new (... new definition ...);\n  INSERT INTO users_new (cols) SELECT cols FROM users;\n  DROP TABLE users;\n  ALTER TABLE users_new RENAME TO users;\n  -- recreate every index, trigger and view that referenced users\n  PRAGMA foreign_key_check;\n  COMMIT;\n  PRAGMA foreign_keys = ON;\n\nsqlc understands these ALTER forms for schema evolution in its own catalog,\nwhich is why they parse, but the database rejects them at run time.",
+      "statement": "ALTER TABLE users ALTER COLUMN name TYPE VARCHAR(10)"
+    },
+    {
+      "file": "db/migrations/0002_bad.sql",
+      "line": 4,
+      "rule": "ban-drop-column",
+      "severity": "error",
+      "message": "dropping column users.code",
+      "guidance": "Running application code (and ORM/sqlc-generated code with cached column lists)\nstill references the column and fails once it is gone.\n\nSafe sequence:\n  1. Remove every read and write of the column from the application and deploy.\n  2. Then, in a later migration, drop the column:\n\n     ALTER TABLE users DROP COLUMN name;\n\nIf the column is already unused, add \"-- safe_sql:disable ban-drop-column\"\nabove the statement to acknowledge this.",
+      "statement": "ALTER TABLE users DROP COLUMN code"
+    },
+    {
+      "file": "db/migrations/0002_bad.sql",
+      "line": 4,
+      "rule": "sqlite-drop-column-restrictions",
+      "severity": "error",
+      "message": "DROP COLUMN users.code fails on SQLite: it is a key or indexed",
+      "guidance": "SQLite added DROP COLUMN in 3.35.0, and even then refuses to drop a column\nthat is a PRIMARY KEY or UNIQUE, has an index, is referenced by a foreign key\nor a generated column, or appears in a view or trigger. The statement fails\nat run time with the migration half applied.\n\nDrop the dependent index, view or trigger first (and recreate it), or rebuild\nthe table without the column (see sqlite-unsupported-alter).",
+      "statement": "ALTER TABLE users DROP COLUMN code"
+    },
+    {
+      "file": "db/migrations/0002_bad.sql",
+      "line": 5,
+      "rule": "sqlite-pragma-in-transaction",
+      "severity": "error",
+      "message": "PRAGMA foreign_keys inside a transaction has no effect",
+      "guidance": "PRAGMA foreign_keys is a no-op inside a transaction and PRAGMA journal_mode\ncannot change there, so a migration that relies on them (the table-rebuild\nprocedure, for one) runs with foreign keys still enforced. Most migration\ntools wrap each file in a transaction.\n\nRun the file outside the tool's transaction (its no-transaction directive)\nand manage the transaction explicitly:\n\n  PRAGMA foreign_keys = OFF;\n  BEGIN;\n  ...\n  COMMIT;\n  PRAGMA foreign_keys = ON;\n\nFor goose: -- +goose NO TRANSACTION",
+      "statement": "PRAGMA foreign_keys = OFF"
+    },
+    {
+      "file": "db/migrations/0003_rebuild.sql",
+      "line": 7,
+      "rule": "sqlite-rebuild-locks-database",
+      "severity": "warning",
+      "message": "rebuilding users copies every row under the write lock",
+      "guidance": "SQLite has one writer at a time. Copying a large table into its\nreplacement holds the write lock (and, without WAL, blocks readers) until\nthe transaction commits. Schedule the migration for a quiet period, and\nprefer WAL mode so readers keep working.",
+      "statement": "DROP TABLE users"
+    },
+    {
+      "file": "db/migrations/0003_rebuild.sql",
+      "line": 7,
+      "rule": "sqlite-table-rebuild",
+      "severity": "error",
+      "message": "rebuild of users does not recreate: view user_names",
+      "guidance": "A table rebuild (CREATE new, INSERT ... SELECT, DROP old, RENAME) must run\ninside one transaction, with foreign keys disabled beforehand when other\ntables reference it, and must recreate every index, trigger and view that\nexisted on the old table, then run PRAGMA foreign_key_check before COMMIT.\nAnything missed is lost silently or fails half way.\n\n  PRAGMA foreign_keys = OFF;\n  BEGIN;\n  CREATE TABLE users_new (...);\n  INSERT INTO users_new (...) SELECT ... FROM users;\n  DROP TABLE users;\n  ALTER TABLE users_new RENAME TO users;\n  CREATE INDEX users_email_idx ON users (email);   -- every former index\n  CREATE TRIGGER ...;                              -- every former trigger\n  CREATE VIEW ...;                                 -- every view over users\n  PRAGMA foreign_key_check;\n  COMMIT;\n  PRAGMA foreign_keys = ON;",
+      "statement": "DROP TABLE users"
+    },
+    {
+      "file": "db/migrations/0003_rebuild.sql",
+      "line": 7,
+      "rule": "sqlite-table-rebuild",
+      "severity": "warning",
+      "message": "rebuild does not run PRAGMA foreign_key_check before COMMIT",
+      "guidance": "A table rebuild (CREATE new, INSERT ... SELECT, DROP old, RENAME) must run\ninside one transaction, with foreign keys disabled beforehand when other\ntables reference it, and must recreate every index, trigger and view that\nexisted on the old table, then run PRAGMA foreign_key_check before COMMIT.\nAnything missed is lost silently or fails half way.\n\n  PRAGMA foreign_keys = OFF;\n  BEGIN;\n  CREATE TABLE users_new (...);\n  INSERT INTO users_new (...) SELECT ... FROM users;\n  DROP TABLE users;\n  ALTER TABLE users_new RENAME TO users;\n  CREATE INDEX users_email_idx ON users (email);   -- every former index\n  CREATE TRIGGER ...;                              -- every former trigger\n  CREATE VIEW ...;                                 -- every view over users\n  PRAGMA foreign_key_check;\n  COMMIT;\n  PRAGMA foreign_keys = ON;",
+      "statement": "DROP TABLE users"
+    }
+  ],
+  "parse_failures": [],
+  "summary": {
+    "errors": 6,
+    "warnings": 2,
+    "files": 3
+  }
+}

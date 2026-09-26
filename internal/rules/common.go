@@ -90,8 +90,8 @@ it in its own migration. Add "-- safe_sql:disable ban-drop-table" to acknowledge
 			r, _ := Get("ban-drop-table")
 			var out []Finding
 			for _, t := range st.DropTable.Tables {
-				if ctx.TableCreatedHere(t) {
-					continue // scratch table created and dropped in the same migration
+				if ctx.TableCreatedHere(t) || ctx.renamedIntoLater(t) {
+					continue // scratch table, or a table rebuild (DROP old; RENAME new TO old)
 				}
 				f := ctx.finding(r, st, fmt.Sprintf("dropping table %s", t))
 				if ctx.recreatedLater(t) {
@@ -303,6 +303,18 @@ func (c *Context) recreatedLater(t sqlparse.TableName) bool {
 	for i := c.Index + 1; i < len(c.Statements); i++ {
 		s := &c.Statements[i]
 		if s.Kind == sqlparse.KindCreateTable && s.CreateTable.Table.Key() == t.Key() {
+			return true
+		}
+	}
+	return false
+}
+
+// renamedIntoLater reports whether a later statement renames some table to t
+// (the tail of SQLite's rebuild procedure).
+func (c *Context) renamedIntoLater(t sqlparse.TableName) bool {
+	for i := c.Index + 1; i < len(c.Statements); i++ {
+		s := &c.Statements[i]
+		if s.Kind == sqlparse.KindRenameTable && strings.EqualFold(s.RenameTable.NewName, t.Name) {
 			return true
 		}
 	}

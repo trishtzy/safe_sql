@@ -157,6 +157,7 @@ func lintSection(f *migrate.File, sec migrate.Section, down bool, parser sqlpars
 		}
 		ctx.Index = i
 		ctx.InTransaction = fileTx || explicitTx
+		claimed := false
 		if report && !fileAll {
 			disabled, all := stmtDisables(st)
 			if !all {
@@ -169,9 +170,15 @@ func lintSection(f *migrate.File, sec migrate.Section, down bool, parser sqlpars
 							fd.Severity = sev
 						}
 						res.Findings = append(res.Findings, Finding{Finding: fd, File: f.Path, Line: f.Line(sec, st.Offset), Down: down})
+						claimed = true
 					}
 				}
 			}
+		}
+		// A statement the parser rejected is a parse failure unless a rule
+		// explained it (SQLite's unsupported ALTER forms).
+		if st.Kind == sqlparse.KindInvalid && !claimed {
+			res.Failures = append(res.Failures, Failure{File: f.Path, Line: f.Line(sec, st.Offset), Message: st.Error})
 		}
 		if !down {
 			cat.Apply(st, f.Path)

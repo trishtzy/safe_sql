@@ -1,0 +1,7 @@
+-- +goose Up
+ALTER TABLE users ADD COLUMN created TEXT DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE users ALTER COLUMN name TYPE VARCHAR(10);
+ALTER TABLE users DROP COLUMN code;
+PRAGMA foreign_keys = OFF;
+-- +goose Down
+SELECT 1;

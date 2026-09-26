@@ -10,6 +10,7 @@ import (
 
 	// Register engine parsers.
 	_ "github.com/trishtzy/safe_sql/internal/sqlparse/postgres"
+	_ "github.com/trishtzy/safe_sql/internal/sqlparse/sqlite"
 )
 
 // Version is set by the linker at release time.
