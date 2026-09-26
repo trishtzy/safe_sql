@@ -1,0 +1,72 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres, POSTGRES_DB: safe_sql_test }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - name: Install sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+      - run: go vet ./...
+      - run: go test ./...
+      - name: Integration tests (verify against Postgres + sqlc)
+        env:
+          SAFE_SQL_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/safe_sql_test?sslmode=disable
+        run: go test -tags integration ./...
+      - name: Lint (golangci-lint)
+        uses: golangci/golangci-lint-action@v6
+        with: { version: latest }
+
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: DeterminateSystems/magic-nix-cache-action@v9
+      - run: nix flake check
+      - run: nix build && ./result/bin/safe_sql --version
+
+  goreleaser-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - run: go install github.com/google/go-licenses/v2@latest
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=docker,publish
+
+  dogfood:
+    # Runs the action from this repo on its own fixtures. Both are expected to
+    # find problems; exit codes are asserted rather than propagated.
+    runs-on: ubuntu-latest
+    needs: goreleaser-snapshot
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - run: go build -o /usr/local/bin/safe_sql ./cmd/safe_sql
+      - name: lint fixtures must report findings
+        run: |
+          set +e
+          safe_sql lint --format github testdata/goose_basic/migrations; code=$?
+          [ "$code" = 1 ] || { echo "expected exit 1, got $code"; exit 1; }

@@ -21,10 +21,10 @@
           version = "0.0.0-dev";
           src = lib.cleanSource ./.;
           subPackages = [ "cmd/safe_sql" ];
-          # Replace with the real hash once go.sum exists:
-          #   nix build 2>&1 | grep 'got:'  -> copy the sha256 here
-          vendorHash = null;
-          ldflags = [ "-s" "-w" "-X main.version=${self.shortRev or "dirty"}" ];
+          # Update after changing go.mod: set to "" (or lib.fakeHash), run
+          # `nix build`, and copy the hash from the "got:" line.
+          vendorHash = "sha256-LKDVO/OnoxBMf9LM/948JINGH8twMCpYxNqtARrzQIk=";
+          ldflags = [ "-s" "-w" "-X github.com/trishtzy/safe_sql/internal/cli.Version=${self.shortRev or "dirty"}" ];
           meta = with lib; {
             description = "Lint SQL migrations for operations that lock tables or break running apps";
             homepage = "https://github.com/trishtzy/safe_sql";
@@ -60,7 +60,11 @@
         };
 
         apps = lib.optionalAttrs hasGoMod {
-          default = flake-utils.lib.mkApp { drv = safe_sql; };
+          default = {
+            type = "app";
+            program = "${safe_sql}/bin/safe_sql";
+            meta.description = "Lint SQL migrations for unsafe operations";
+          };
         };
 
         formatter = pkgs.nixfmt;

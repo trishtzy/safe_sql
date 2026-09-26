@@ -1,0 +1,87 @@
+name: safe_sql
+description: Lint SQL migrations for operations that lock tables or break running code (strong_migrations for raw SQL, sqlc-aware).
+author: Tricia Tan
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  version:
+    description: safe_sql release to install (e.g. v0.3.0). "latest" resolves the newest release.
+    default: latest
+  args:
+    description: Extra arguments for the lint/verify command (e.g. "--target-version 16 db/migrations").
+    default: ""
+  changed-only:
+    description: Only report migrations changed in this pull request (all files still build the schema model).
+    default: "true"
+  verify:
+    description: Run `safe_sql verify` (needs sqlc and Docker or database-url) instead of lint.
+    default: "false"
+  database-url:
+    description: Database URL for verify; when empty a Postgres container is started.
+    default: ""
+  against:
+    description: Git ref whose queries are deployed, for verify. Defaults to the PR base branch.
+    default: ""
+  strict:
+    description: Fail on warnings too.
+    default: "false"
+  working-directory:
+    description: Directory containing safe_sql.yaml / sqlc.yaml.
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Install safe_sql
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        os=$(uname -s | tr '[:upper:]' '[:lower:]'); arch=$(uname -m)
+        case "$arch" in x86_64) arch=amd64;; aarch64|arm64) arch=arm64;; esac
+        if [ "$VERSION" = latest ]; then
+          VERSION=$(gh release view --repo trishtzy/safe_sql --json tagName -q .tagName)
+        fi
+        v=${VERSION#v}
+        url="https://github.com/trishtzy/safe_sql/releases/download/${VERSION}/safe_sql_${v}_${os}_${arch}.tar.gz"
+        mkdir -p "$RUNNER_TEMP/safe_sql"
+        curl -fsSL "$url" | tar -xz -C "$RUNNER_TEMP/safe_sql"
+        echo "$RUNNER_TEMP/safe_sql" >> "$GITHUB_PATH"
+        "$RUNNER_TEMP/safe_sql/safe_sql" --version
+
+    - name: Run safe_sql
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CHANGED_ONLY: ${{ inputs.changed-only }}
+        VERIFY: ${{ inputs.verify }}
+        DATABASE_URL: ${{ inputs.database-url }}
+        AGAINST: ${{ inputs.against }}
+        STRICT: ${{ inputs.strict }}
+        EXTRA_ARGS: ${{ inputs.args }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+      run: |
+        set -uo pipefail
+        args=(--format github)
+        [ "$STRICT" = true ] && args+=(--strict)
+        if [ "$VERIFY" = true ]; then
+          ref="${AGAINST:-${BASE_REF:-main}}"
+          git fetch --no-tags --depth=1 origin "$ref:refs/remotes/origin/$ref" 2>/dev/null || true
+          against="origin/$ref"; git rev-parse --verify -q "$against" >/dev/null || against="$ref"
+          args+=(--against "$against")
+          [ -n "$DATABASE_URL" ] && args+=(--database-url "$DATABASE_URL")
+          cmd=verify
+        else
+          cmd=lint
+          if [ "$CHANGED_ONLY" = true ] && [ -n "${BASE_SHA:-}" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+            args+=(--changed-since "$BASE_SHA")
+          fi
+        fi
+        # shellcheck disable=SC2086
+        safe_sql "$cmd" "${args[@]}" $EXTRA_ARGS

@@ -1,0 +1,14 @@
+version: "2"
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # Writes to report/CLI streams: a failed stdout write cannot be reported anywhere better.
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [errcheck]

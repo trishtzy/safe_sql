@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/trishtzy/safe_sql/internal/catalog"
@@ -100,7 +101,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		return nil, err
 	}
 	if !opts.KeepTemp {
-		defer os.RemoveAll(tmp)
+		defer func() { _ = os.RemoveAll(tmp) }()
 	} else {
 		fmt.Fprintf(opts.Stderr, "safe_sql: keeping temp dir %s\n", tmp)
 	}
@@ -236,7 +237,7 @@ func ParseVetOutput(out, prefix, root string) []Breakage {
 		}
 		if m := staticRe.FindStringSubmatch(line); m != nil {
 			ln := 0
-			fmt.Sscanf(m[2], "%d", &ln)
+			ln, _ = strconv.Atoi(m[2])
 			bs = append(bs, Breakage{QueryFile: display(root, strings.TrimPrefix(m[1], prefix)), Line: ln, Message: m[4], Static: true})
 			continue
 		}

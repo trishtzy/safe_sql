@@ -1,0 +1,18 @@
+- id: safe_sql
+  name: safe_sql lint
+  description: Lint SQL migrations for operations that lock tables or break running code.
+  entry: safe_sql lint
+  language: golang
+  files: \.sql$
+  pass_filenames: true
+  require_serial: true
+  additional_dependencies: ["./cmd/safe_sql"]
+
+- id: safe_sql-system
+  name: safe_sql lint (system binary)
+  description: Same as safe_sql but uses a safe_sql binary already on PATH.
+  entry: safe_sql lint
+  language: system
+  files: \.sql$
+  pass_filenames: true
+  require_serial: true

@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -15,9 +17,9 @@ import (
 )
 
 type lintFlags struct {
-	engine, tool, targetVersion, startAfter, format, pkg string
-	checkDown, strict, dump                              bool
-	disable, enable, only                                []string
+	engine, tool, targetVersion, startAfter, format, pkg, changedSince string
+	checkDown, strict, dump                                            bool
+	disable, enable, only                                              []string
 }
 
 func newLintCmd(code *int, configPath *string) *cobra.Command {
@@ -87,6 +89,7 @@ func addLintFlags(cmd *cobra.Command, fl *lintFlags) {
 	f.StringSliceVar(&fl.disable, "disable", nil, "rule IDs to disable (adds to config)")
 	f.StringSliceVar(&fl.enable, "enable", nil, "opt-in rule IDs to enable (adds to config)")
 	f.StringSliceVar(&fl.only, "only", nil, "run only these rule IDs")
+	f.StringVar(&fl.changedSince, "changed-since", "", "only report files added or modified since this git ref (all files still build the schema model)")
 }
 
 // lintRun is one lint invocation: an engine and its paths.
@@ -131,6 +134,14 @@ func resolveRuns(cmd *cobra.Command, args []string, fl *lintFlags, configPath st
 	base.Disabled = append(base.Disabled, fl.disable...)
 	base.Enabled = append(base.Enabled, fl.enable...)
 
+	if fl.changedSince != "" {
+		changed, err := gitChangedFiles(fl.changedSince)
+		if err != nil {
+			return nil, err
+		}
+		base.ReportOnly = changed
+	}
+
 	if len(args) > 0 {
 		eng := sqlparse.Engine(fl.engine)
 		if eng == "" {
@@ -165,6 +176,30 @@ func resolveRuns(cmd *cobra.Command, args []string, fl *lintFlags, configPath st
 		return nil, fmt.Errorf("no package named %q in %s", fl.pkg, proj.SqlcPath)
 	}
 	return runs, nil
+}
+
+// gitChangedFiles lists files added, modified or untracked relative to ref,
+// as paths relative to the working directory.
+func gitChangedFiles(ref string) ([]string, error) {
+	var out []string
+	for _, args := range [][]string{
+		{"diff", "--name-only", "--diff-filter=AMR", "--relative", ref},
+		{"ls-files", "--others", "--exclude-standard"},
+	} {
+		b, err := exec.Command("git", args...).Output()
+		if err != nil {
+			return nil, fmt.Errorf("git %s: %w (is %q a valid ref?)", strings.Join(args, " "), err, ref)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			if line != "" {
+				out = append(out, filepath.Clean(line))
+			}
+		}
+	}
+	if out == nil {
+		out = []string{"\x00none"} // nothing changed: report nothing, but keep ReportOnly non-empty
+	}
+	return out, nil
 }
 
 func dump(cmd *cobra.Command, paths []string, opts lint.Options) error {

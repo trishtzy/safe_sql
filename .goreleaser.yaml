@@ -1,0 +1,67 @@
+version: 2
+project_name: safe_sql
+
+before:
+  hooks:
+    - go mod tidy
+    - sh -c 'go-licenses report ./cmd/safe_sql --template .goreleaser/licenses.tpl > THIRD_PARTY_LICENSES 2>/dev/null || echo "see go.mod" > THIRD_PARTY_LICENSES'
+
+builds:
+  - id: safe_sql
+    main: ./cmd/safe_sql
+    binary: safe_sql
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/trishtzy/safe_sql/internal/cli.Version={{.Version}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - THIRD_PARTY_LICENSES
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+dockers:
+  - image_templates: ["ghcr.io/trishtzy/safe_sql:{{ .Version }}-amd64"]
+    use: buildx
+    goarch: amd64
+    dockerfile: Dockerfile
+    build_flag_templates: ["--platform=linux/amd64"]
+    extra_files: [LICENSE, THIRD_PARTY_LICENSES]
+  - image_templates: ["ghcr.io/trishtzy/safe_sql:{{ .Version }}-arm64"]
+    use: buildx
+    goarch: arm64
+    dockerfile: Dockerfile
+    build_flag_templates: ["--platform=linux/arm64"]
+    extra_files: [LICENSE, THIRD_PARTY_LICENSES]
+
+docker_manifests:
+  - name_template: "ghcr.io/trishtzy/safe_sql:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/trishtzy/safe_sql:{{ .Version }}-amd64"
+      - "ghcr.io/trishtzy/safe_sql:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/trishtzy/safe_sql:latest"
+    image_templates:
+      - "ghcr.io/trishtzy/safe_sql:{{ .Version }}-amd64"
+      - "ghcr.io/trishtzy/safe_sql:{{ .Version }}-arm64"
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:"]
+
+release:
+  github:
+    owner: trishtzy
+    name: safe_sql

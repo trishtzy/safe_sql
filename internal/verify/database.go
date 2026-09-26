@@ -37,6 +37,9 @@ func (p *pgDB) Exec(ctx context.Context, sql string) error {
 func (p *pgDB) URI() string  { return p.uri }
 func (p *pgDB) Close() error { return p.conn.Close(context.Background()) }
 
+// Cleanups below are best-effort: a failure to drop the scratch database or
+// close a connection must not mask the verify result.
+
 // openDatabase returns a database for the package's engine: the configured
 // URL, or an ephemeral container.
 func openDatabase(ctx context.Context, opts Options) (database, func(), error) {
@@ -86,29 +89,29 @@ func openPostgres(ctx context.Context, opts Options) (database, func(), error) {
 	if _, err := conn.Exec(ctx, "CREATE DATABASE "+name); err != nil {
 		fmt.Fprintf(opts.Stderr, "safe_sql: cannot create a scratch database (%v); using %s as-is, it must be empty\n", err, redact(uri))
 		db := &pgDB{conn: conn, uri: uri}
-		return db, func() { db.Close(); cleanup() }, nil
+		return db, func() { _ = db.Close(); cleanup() }, nil
 	}
 	scratch, err := withDatabase(uri, name)
 	if err != nil {
-		conn.Close(ctx)
+		_ = conn.Close(ctx)
 		cleanup()
 		return nil, nil, err
 	}
 	sconn, err := pgx.Connect(ctx, scratch)
 	if err != nil {
-		conn.Exec(ctx, "DROP DATABASE "+name)
-		conn.Close(ctx)
+		_, _ = conn.Exec(ctx, "DROP DATABASE "+name)
+		_ = conn.Close(ctx)
 		cleanup()
 		return nil, nil, fmt.Errorf("connect to scratch database: %w", err)
 	}
 	db := &pgDB{conn: sconn, uri: scratch}
 	return db, func() {
-		db.Close()
+		_ = db.Close()
 		bg := context.Background()
 		if _, err := conn.Exec(bg, "DROP DATABASE "+name+" WITH (FORCE)"); err != nil {
-			conn.Exec(bg, "DROP DATABASE "+name)
+			_, _ = conn.Exec(bg, "DROP DATABASE "+name)
 		}
-		conn.Close(bg)
+		_ = conn.Close(bg)
 		cleanup()
 	}, nil
 }
