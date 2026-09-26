@@ -1,0 +1,28 @@
+{
+  "findings": [
+    {
+      "file": "db/migrations/000002_add_email.up.sql",
+      "line": 2,
+      "rule": "require-concurrent-index-creation",
+      "severity": "error",
+      "message": "creating index authors_email_idx on authors without CONCURRENTLY",
+      "guidance": "CREATE INDEX takes a SHARE lock on the table, blocking writes until the index\nis built. Build it concurrently instead:\n\n  CREATE INDEX CONCURRENTLY idx_users_email ON users (email);\n\nCONCURRENTLY cannot run inside a transaction, so the migration file must opt\nout of the tool's transaction wrapper (see concurrent-index-in-transaction).\nNote that a concurrent build that fails leaves an INVALID index behind that\nmust be dropped before retrying.",
+      "statement": "CREATE INDEX authors_email_idx ON authors (email)"
+    },
+    {
+      "file": "db/migrations/000002_add_email.up.sql",
+      "line": 3,
+      "rule": "ban-dml-in-migration",
+      "severity": "error",
+      "message": "INSERT on authors in a migration that also changes schema",
+      "guidance": "An UPDATE/INSERT/DELETE that touches many rows in the same migration (and\ntransaction) as schema changes keeps the DDL locks held until the data change\nfinishes, and a single large statement can take a long time on its own.\n\nBackfill in a separate step, outside the schema migration, in batches:\n\n  UPDATE users SET status = 'active' WHERE id BETWEEN $1 AND $2;  -- loop over ranges\n\nIf the table is small or the migration is a one-row seed, add\n\"-- safe_sql:disable ban-dml-in-migration\" above the statement.",
+      "statement": "INSERT INTO authors (name) SELECT 'x' FROM generate_series(1, 10)"
+    }
+  ],
+  "parse_failures": [],
+  "summary": {
+    "errors": 2,
+    "warnings": 0,
+    "files": 2
+  }
+}

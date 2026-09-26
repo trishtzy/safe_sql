@@ -29,6 +29,10 @@ type tc struct {
 	fname string
 }
 
+// seen records every rule ID that produced a finding in any case, so the
+// coverage test can prove each rule has at least one "bad" case.
+var seen = map[string]bool{}
+
 func run(t *testing.T, c tc) *lint.Result {
 	t.Helper()
 	opts := lint.Options{Engine: sqlparse.EnginePostgres, PlainInTransaction: true, StartAfter: "0001", Enabled: []string{"require-concurrent-index-drop"}}
@@ -54,6 +58,9 @@ func run(t *testing.T, c tc) *lint.Result {
 	}
 	for _, fl := range res.Failures {
 		t.Fatalf("%s: parse failure: %+v", c.name, fl)
+	}
+	for _, f := range res.Findings {
+		seen[f.RuleID] = true
 	}
 	return res
 }
@@ -95,6 +102,8 @@ func TestCommonRules(t *testing.T) {
 		{name: "check not valid", sql: "ALTER TABLE users ADD CONSTRAINT age_ck CHECK (age >= 0) NOT VALID", want: nil},
 		{name: "dml with ddl", sql: "ALTER TABLE users ADD COLUMN x int; UPDATE users SET x = 1", want: []string{"ban-dml-in-migration"}},
 		{name: "dml alone", sql: "UPDATE users SET age = 1", want: nil},
+		{name: "seed data into new table", sql: "CREATE TABLE roles (id int); INSERT INTO roles VALUES (1)", want: nil},
+		{name: "scratch table", sql: "CREATE TABLE tmp (id int); DROP TABLE tmp", want: nil},
 		{name: "wide index", sql: "CREATE INDEX CONCURRENTLY i ON users (a, b, c, d)", want: []string{"index-too-many-columns"}, opts: noTx},
 		{name: "wide unique index", sql: "CREATE UNIQUE INDEX CONCURRENTLY i ON users (a, b, c, d)", want: nil, opts: noTx},
 	})
@@ -193,20 +202,15 @@ func TestDisablesAndConfig(t *testing.T) {
 	}
 }
 
-func TestEveryRuleHasTestCoverage(t *testing.T) {
-	// Every registered rule must have appeared in at least one expectation above.
-	covered := map[string]bool{}
-	for _, set := range [][]tc{} {
-		for _, c := range set {
-			for _, id := range c.want {
-				covered[id] = true
-			}
-		}
-	}
-	_ = covered
+// TestZZEveryRuleCovered runs last (Go runs tests in source order) and
+// fails if any Postgres rule never fired in the cases above.
+func TestZZEveryRuleCovered(t *testing.T) {
 	for _, r := range rules.ForEngine(sqlparse.EnginePostgres) {
 		if r.Guidance == "" || r.Summary == "" {
 			t.Errorf("%s: missing summary or guidance", r.ID)
+		}
+		if !seen[r.ID] {
+			t.Errorf("%s: no test case produces this finding", r.ID)
 		}
 	}
 }

@@ -18,10 +18,15 @@ var Version = "dev"
 // Main runs the CLI and returns the process exit code:
 // 0 clean, 1 findings, 2 usage or parse error.
 func Main(args []string) int {
-	return run(args, os.Stdout, os.Stderr)
+	return Run(args, os.Stdout, os.Stderr)
 }
 
-func run(args []string, stdout, stderr io.Writer) int {
+// Run executes args with the given streams and returns the exit code.
+func Run(args []string, stdout, stderr io.Writer) int {
+	var (
+		code       int
+		configPath string
+	)
 	root := &cobra.Command{
 		Use:           "safe_sql",
 		Short:         "Catch unsafe SQL migrations before they reach production",
@@ -32,9 +37,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetArgs(args)
+	root.PersistentFlags().StringVarP(&configPath, "config", "c", "", "path to safe_sql.yaml (default: search upward from the working directory)")
 
-	var code int
-	root.AddCommand(newLintCmd(&code), newRulesCmd())
+	root.AddCommand(newLintCmd(&code, &configPath), newRulesCmd(), newInitCmd(&configPath))
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(stderr, "safe_sql:", err)

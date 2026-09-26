@@ -90,6 +90,9 @@ it in its own migration. Add "-- safe_sql:disable ban-drop-table" to acknowledge
 			r, _ := Get("ban-drop-table")
 			var out []Finding
 			for _, t := range st.DropTable.Tables {
+				if ctx.TableCreatedHere(t) {
+					continue // scratch table created and dropped in the same migration
+				}
 				f := ctx.finding(r, st, fmt.Sprintf("dropping table %s", t))
 				if ctx.recreatedLater(t) {
 					f.Severity = SeverityError
@@ -109,7 +112,9 @@ reads and writes are blocked, and running code may not handle the new type.
 
 Some changes do not rewrite the table and are allowed: widening varchar(n),
 varchar -> text, numeric precision increase with the same scale, cidr -> inet,
-timestamp/time/interval precision increase.
+timestamp/time/interval precision increase. safe_sql can only recognise these
+when the column's original definition is in the migrations it was given; with
+a partial history every type change is reported.
 
 Safe sequence for everything else:
   1. Add a new column with the new type:
@@ -236,7 +241,7 @@ Backfill in a separate step, outside the schema migration, in batches:
 If the table is small or the migration is a one-row seed, add
 "-- safe_sql:disable ban-dml-in-migration" above the statement.`,
 		Check: func(ctx *Context, st *sqlparse.Statement) []Finding {
-			if st.Kind != sqlparse.KindDML || st.DML.Op == "select" || !ctx.HasDDL() {
+			if st.Kind != sqlparse.KindDML || st.DML.Op == "select" || !ctx.HasDDL() || ctx.TableCreatedHere(st.DML.Table) {
 				return nil
 			}
 			r, _ := Get("ban-dml-in-migration")

@@ -46,9 +46,9 @@ type Finding struct {
 
 // Failure is a file that could not be parsed.
 type Failure struct {
-	File    string
-	Line    int
-	Message string
+	File    string `json:"file"`
+	Line    int    `json:"line,omitempty"`
+	Message string `json:"message"`
 }
 
 // Result of a lint run.
@@ -97,13 +97,17 @@ func RunFiles(files []*migrate.File, opts Options) (*Result, error) {
 	}
 	active := activeRules(opts)
 	cat := catalog.New()
-	res := &Result{Files: files}
+	res := &Result{}
 	reportOnly := map[string]bool{}
 	for _, p := range opts.ReportOnly {
 		reportOnly[p] = true
 	}
 
 	for _, f := range files {
+		if f.IsDownFile && !opts.CheckDown {
+			continue
+		}
+		res.Files = append(res.Files, f)
 		report := true
 		if opts.StartAfter != "" && f.Version != "" && compareVersions(f.Version, opts.StartAfter) <= 0 {
 			report = false
