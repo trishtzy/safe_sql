@@ -1,7 +1,8 @@
 name: release
 on:
   push:
-    tags: ["v*"]
+    # Semantic version tags only; the floating "v1" tag must not start a release.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
 
 permissions:
   contents: write
