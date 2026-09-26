@@ -70,7 +70,6 @@ type AI struct {
 	Mode                    string   `yaml:"mode"`
 	Provider                string   `yaml:"provider"`
 	Model                   string   `yaml:"model"`
-	BaseURL                 string   `yaml:"base_url"`
 	MaxIterations           int      `yaml:"max_iterations"`
 	Rules                   []string `yaml:"rules"`
 	DeterministicFirst      *bool    `yaml:"deterministic_first"`
@@ -265,7 +264,7 @@ func load(dir, explicitConfig string, skipConfig bool) (*Project, error) {
 func defaultAI() AI {
 	t := true
 	return AI{
-		Trigger: "@safe_sql_ai", Mode: "commit", Provider: "anthropic", Model: "claude-sonnet-5",
+		Trigger: "@safe_sql_ai", Mode: "commit", Provider: "anthropic", Model: "claude-opus-5",
 		MaxIterations: 3, DeterministicFirst: &t,
 		AllowedAssociations: []string{"OWNER", "MEMBER", "COLLABORATOR"},
 		CommitMessage:       "safe_sql: rewrite migration using a safer pattern",
@@ -285,9 +284,6 @@ func mergeAI(dst *AI, src AI) {
 	}
 	if src.Model != "" {
 		dst.Model = src.Model
-	}
-	if src.BaseURL != "" {
-		dst.BaseURL = src.BaseURL
 	}
 	if src.MaxIterations > 0 {
 		dst.MaxIterations = src.MaxIterations
@@ -471,7 +467,7 @@ ai:
   enabled: false
   trigger: "@safe_sql_ai"
   mode: commit            # commit | suggest | comment
-  model: claude-sonnet-5
+  model: claude-opus-5     # ANTHROPIC_API_KEY (and optional ANTHROPIC_BASE_URL) come from the environment
   max_iterations: 3
 `)
 	return b.String()

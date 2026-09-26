@@ -207,8 +207,7 @@ ai:
   auto: false              # true = also run after every failing lint, without a mention
   mode: commit             # commit | suggest | comment  (see AI section)
   provider: anthropic      # only provider in v1
-  model: claude-sonnet-5   # any Claude model id; ANTHROPIC_API_KEY comes from env/secrets
-  base_url: ""             # optional gateway
+  model: claude-opus-5     # any Claude model id; ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL come from the environment, never from this file
   max_iterations: 3        # fix -> re-lint loop bound
   rules: []                # restrict AI fixing to these rule IDs; empty = all fixable rules
   deterministic_first: true  # apply non-AI fixers before asking the model
