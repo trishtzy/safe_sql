@@ -34,7 +34,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	root.SetArgs(args)
 
 	var code int
-	root.AddCommand(newLintCmd(&code))
+	root.AddCommand(newLintCmd(&code), newRulesCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(stderr, "safe_sql:", err)
