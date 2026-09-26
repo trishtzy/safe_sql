@@ -70,3 +70,9 @@ jobs:
           set +e
           safe_sql lint --format github testdata/goose_basic/migrations; code=$?
           [ "$code" = 1 ] || { echo "expected exit 1, got $code"; exit 1; }
+      - name: AI fix flow with the fake provider must leave no findings
+        working-directory: testdata/ai_fake
+        env: { SAFE_SQL_AI_FAKE: responses.json }
+        run: |
+          safe_sql fix --ai --dry-run --format json migrations | tee /tmp/fix.json
+          [ "$(jq .remaining_findings /tmp/fix.json)" = 0 ]

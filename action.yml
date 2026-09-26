@@ -18,6 +18,16 @@ inputs:
   verify:
     description: Run `safe_sql verify` (needs sqlc and Docker or database-url) instead of lint.
     default: "false"
+  mode:
+    description: >-
+      lint (default), verify, or ai-fix. ai-fix is for workflows triggered by
+      `issue_comment` and rewrites the flagged migrations in the pull request
+      when a permitted user mentions the trigger (default @safe_sql_ai).
+      Needs ANTHROPIC_API_KEY in env and contents/pull-requests write permissions.
+    default: ""
+  ai-delivery:
+    description: For ai-fix, how to deliver changes - commit | suggest | comment (default from safe_sql.yaml, else commit).
+    default: ""
   database-url:
     description: Database URL for verify; when empty a Postgres container is started.
     default: ""
@@ -53,7 +63,47 @@ runs:
         echo "$RUNNER_TEMP/safe_sql" >> "$GITHUB_PATH"
         "$RUNNER_TEMP/safe_sql/safe_sql" --version
 
+    # Security notes for ai-fix:
+    #  - Only the release binary runs; nothing from the checkout is executed. SQL is data.
+    #  - Gating (enabled, trigger, allowed associations) is read from safe_sql.yaml on the
+    #    BASE branch, never from the pull request head, so a PR cannot enable or widen it.
+    #  - The API key and any gateway URL come from the workflow environment, never from files.
+    #  - A commit pushed with GITHUB_TOKEN does not start new workflow runs; lint is re-run
+    #    here and reported in the summary comment. Use a PAT/app token if you need CI to re-run.
+    - name: AI fix (issue_comment)
+      if: inputs.mode == 'ai-fix'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        COMMENT_BODY: ${{ github.event.comment.body }}
+        COMMENT_ID: ${{ github.event.comment.id }}
+        AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+        IS_PR: ${{ github.event.issue.pull_request != null }}
+        PR_NUMBER: ${{ github.event.issue.number }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        DELIVERY: ${{ inputs.ai-delivery }}
+        EXTRA_ARGS: ${{ inputs.args }}
+      run: |
+        set -euo pipefail
+        base_ref=$(gh pr view "$PR_NUMBER" --json baseRefName -q .baseRefName 2>/dev/null || echo "$DEFAULT_BRANCH")
+        git fetch --no-tags --depth=1 origin "$base_ref" 2>/dev/null || true
+        base_cfg="$RUNNER_TEMP/base_safe_sql.yaml"
+        git show "origin/$base_ref:safe_sql.yaml" > "$base_cfg" 2>/dev/null || { echo "no safe_sql.yaml on $base_ref; ai-fix is disabled"; exit 0; }
+        set +e
+        safe_sql github gate --base-config "$base_cfg" --body "$COMMENT_BODY" --association "$AUTHOR_ASSOCIATION" --is-pr="$IS_PR"; rc=$?
+        set -e
+        [ "$rc" = 0 ] || { [ "$rc" = 78 ] && exit 0 || exit "$rc"; }
+        safe_sql github react --comment-id "$COMMENT_ID" --content eyes
+        gh pr checkout "$PR_NUMBER"
+        mode=${DELIVERY:-$(safe_sql github mode --base-config "$base_cfg")}
+        # shellcheck disable=SC2086
+        safe_sql -c "$base_cfg" fix --ai --format json $EXTRA_ARGS > "$RUNNER_TEMP/fix.json" || true
+        safe_sql github deliver --pr "$PR_NUMBER" --mode "$mode" --input "$RUNNER_TEMP/fix.json"
+        safe_sql github react --comment-id "$COMMENT_ID" --content rocket
+
     - name: Run safe_sql
+      if: inputs.mode != 'ai-fix'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
@@ -63,13 +113,14 @@ runs:
         AGAINST: ${{ inputs.against }}
         STRICT: ${{ inputs.strict }}
         EXTRA_ARGS: ${{ inputs.args }}
+        MODE: ${{ inputs.mode }}
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
         BASE_REF: ${{ github.event.pull_request.base.ref }}
       run: |
         set -uo pipefail
         args=(--format github)
         [ "$STRICT" = true ] && args+=(--strict)
-        if [ "$VERIFY" = true ]; then
+        if [ "$VERIFY" = true ] || [ "${MODE:-}" = verify ]; then
           ref="${AGAINST:-${BASE_REF:-main}}"
           git fetch --no-tags --depth=1 origin "$ref:refs/remotes/origin/$ref" 2>/dev/null || true
           against="origin/$ref"; git rev-parse --verify -q "$against" >/dev/null || against="$ref"

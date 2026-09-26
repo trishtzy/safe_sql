@@ -1,0 +1,1 @@
+fix --dry-run --format json migrations

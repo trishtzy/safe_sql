@@ -1,0 +1,33 @@
+{
+  "modified": [
+    "migrations/0001_init.sql",
+    "migrations/0002_unsafe.sql"
+  ],
+  "created": [
+    "migrations/0004_create_users_token_idx_concurrently.sql"
+  ],
+  "files": {
+    "migrations/0001_init.sql": "-- +goose Up\nCREATE TABLE users (\n  id bigserial PRIMARY KEY,\n  email varchar(255) NOT NULL,\n  name text,\n  settings jsonb\n);\nCREATE INDEX users_email_idx ON users (email);\n-- +goose Down\nDROP TABLE users;\n",
+    "migrations/0002_unsafe.sql": "-- +goose Up\nALTER TABLE users DROP COLUMN name;\nALTER TABLE users ADD COLUMN token uuid DEFAULT gen_random_uuid();\nALTER TABLE users ALTER COLUMN email SET NOT NULL;\nUPDATE users SET token = gen_random_uuid() WHERE token IS NULL;\n-- +goose Down\nALTER TABLE users ADD COLUMN name text;\n",
+    "migrations/0004_create_users_token_idx_concurrently.sql": "-- +goose NO TRANSACTION\n-- +goose Up\nCREATE INDEX CONCURRENTLY users_token_idx ON users (token);\n\n-- +goose Down\nDROP INDEX CONCURRENTLY IF EXISTS users_token_idx;\n"
+  },
+  "diffs": {
+    "migrations/0001_init.sql": "--- migrations/0001_init.sql\n+++ migrations/0001_init.sql\n@@ -3,7 +3,7 @@\n   id bigserial PRIMARY KEY,\n   email varchar(255) NOT NULL,\n   name text,\n-  settings json\n+  settings jsonb\n );\n CREATE INDEX users_email_idx ON users (email);\n -- +goose Down\n",
+    "migrations/0002_unsafe.sql": "--- migrations/0002_unsafe.sql\n+++ migrations/0002_unsafe.sql\n@@ -1,7 +1,6 @@\n -- +goose Up\n ALTER TABLE users DROP COLUMN name;\n ALTER TABLE users ADD COLUMN token uuid DEFAULT gen_random_uuid();\n-CREATE INDEX users_token_idx ON users (token);\n ALTER TABLE users ALTER COLUMN email SET NOT NULL;\n UPDATE users SET token = gen_random_uuid() WHERE token IS NULL;\n -- +goose Down\n",
+    "migrations/0004_create_users_token_idx_concurrently.sql": "--- /dev/null\n+++ migrations/0004_create_users_token_idx_concurrently.sql\n@@ -1,0 +1,6 @@\n+-- +goose NO TRANSACTION\n+-- +goose Up\n+CREATE INDEX CONCURRENTLY users_token_idx ON users (token);\n+\n+-- +goose Down\n+DROP INDEX CONCURRENTLY IF EXISTS users_token_idx;\n"
+  },
+  "notes": [
+    "migrations/0001_init.sql:2 prefer-jsonb fixed",
+    "migrations/0002_unsafe.sql:4 require-concurrent-index-creation fixed (moved the statement to migrations/0004_create_users_token_idx_concurrently.sql, which runs outside a transaction)"
+  ],
+  "summaries": null,
+  "declined": null,
+  "rejected": null,
+  "remaining_findings": 4,
+  "unfixed": [
+    "migrations/0002_unsafe.sql:2 ban-drop-column: dropping column users.name",
+    "migrations/0002_unsafe.sql:3 add-column-volatile-default: adding column users.token with volatile default gen_random_uuid()",
+    "migrations/0002_unsafe.sql:5 set-not-null-without-check: SET NOT NULL on users.email without a validated CHECK (email IS NOT NULL) constraint",
+    "migrations/0002_unsafe.sql:6 ban-dml-in-migration: UPDATE on users in a migration that also changes schema"
+  ]
+}

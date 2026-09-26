@@ -198,6 +198,59 @@ Findings appear as annotations on the changed lines. By default only
 migrations changed in the pull request are reported (every file still feeds
 the schema model); set `changed-only: "false"` to report everything.
 
+### AI auto-fix from a pull request comment
+
+With `ai.enabled: true` in `safe_sql.yaml`, a maintainer can comment
+`@safe_sql_ai` on a pull request and safe_sql rewrites the flagged migrations
+in that PR: deterministic fixes first (`CONCURRENTLY`, `NOT VALID` plus a
+validate migration, unique-via-index, `jsonb`), then a Claude model for the
+patterns that need judgement (rename via a new column, batched backfills,
+`NOT NULL` through a validated check constraint). Every proposal is validated
+(only migration directories, only files with findings or new versioned files,
+must parse, no smuggled `safe_sql:disable`) and re-linted before delivery.
+
+```yaml
+# .github/workflows/safe_sql_ai.yml
+on:
+  issue_comment:
+    types: [created]
+concurrency: safe_sql-ai-${{ github.event.issue.number }}
+jobs:
+  ai-fix:
+    if: github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    permissions: { contents: write, pull-requests: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: trishtzy/safe_sql@v1
+        with: { mode: ai-fix }
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+```yaml
+# safe_sql.yaml
+ai:
+  enabled: true
+  trigger: "@safe_sql_ai"
+  mode: commit               # commit to the PR branch | suggest (review suggestions) | comment (diffs)
+  model: claude-opus-5
+  max_iterations: 3
+  allowed_associations: [OWNER, MEMBER, COLLABORATOR]
+  rules: []                  # restrict which findings the model may fix
+```
+
+Safety properties: the gate (`enabled`, `trigger`, `allowed_associations`) is
+read from `safe_sql.yaml` on the base branch, so a pull request cannot enable
+the feature or widen who may trigger it; the API key and any gateway URL come
+only from the workflow environment; the model never executes anything, it
+proposes file contents that safe_sql validates. The same flow runs locally
+with `safe_sql fix --ai` (or `safe_sql fix` for deterministic fixes only,
+`--dry-run` to preview). A commit pushed with `GITHUB_TOKEN` does not start
+new workflow runs, so the result is re-linted in the same job and summarised
+in a comment.
+
 ### pre-commit
 
 ```yaml

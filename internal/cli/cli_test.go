@@ -38,6 +38,9 @@ func TestGolden(t *testing.T) {
 			}
 			defer os.Chdir(wd)
 
+			if _, err := os.Stat(filepath.Join(dir, "responses.json")); err == nil {
+				t.Setenv("SAFE_SQL_AI_FAKE", filepath.Join(dir, "responses.json"))
+			}
 			var stdout, stderr bytes.Buffer
 			code := Run(args, &stdout, &stderr)
 			var pretty bytes.Buffer

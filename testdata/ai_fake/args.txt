@@ -1,0 +1,1 @@
+fix --ai --dry-run --format json migrations

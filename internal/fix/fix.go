@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -273,8 +274,7 @@ func NewVersioner(files []*migrate.File) *Versioner {
 		v.ok = true
 		v.dir = filepath.Dir(f.Path)
 		v.tool = f.Tool
-		var n int64
-		fmt.Sscanf(f.Version, "%d", &n)
+		n, _ := strconv.ParseInt(f.Version, 10, 64)
 		if n > maxV {
 			maxV = n
 			v.width = len(f.Version)
@@ -293,8 +293,7 @@ func NewVersioner(files []*migrate.File) *Versioner {
 }
 
 func mustInt(s string) int64 {
-	var n int64
-	fmt.Sscanf(s, "%d", &n)
+	n, _ := strconv.ParseInt(s, 10, 64)
 	return n
 }
 
