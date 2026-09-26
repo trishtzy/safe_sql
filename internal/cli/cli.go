@@ -39,7 +39,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	root.SetArgs(args)
 	root.PersistentFlags().StringVarP(&configPath, "config", "c", "", "path to safe_sql.yaml (default: search upward from the working directory)")
 
-	root.AddCommand(newLintCmd(&code, &configPath), newRulesCmd(), newInitCmd(&configPath))
+	root.AddCommand(newLintCmd(&code, &configPath), newVerifyCmd(&code, &configPath), newRulesCmd(), newInitCmd(&configPath))
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(stderr, "safe_sql:", err)

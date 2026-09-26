@@ -14,3 +14,7 @@ coverage.*
 .DS_Store
 .idea/
 .vscode/
+
+# devenv
+.devenv/
+.devenv.flake.nix
