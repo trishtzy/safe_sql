@@ -97,8 +97,19 @@ runs:
         safe_sql github react --comment-id "$COMMENT_ID" --content eyes
         gh pr checkout "$PR_NUMBER"
         mode=${DELIVERY:-$(safe_sql github mode --base-config "$base_cfg")}
+        # Use the base branch's settings for the run too: overwrite the PR's copy
+        # in the working tree so paths resolve against the repo. deliver commits
+        # only the migration files it changed, never this file.
+        cp "$base_cfg" safe_sql.yaml
+        set +e
         # shellcheck disable=SC2086
-        safe_sql -c "$base_cfg" fix --ai --format json $EXTRA_ARGS > "$RUNNER_TEMP/fix.json" || true
+        safe_sql fix --ai --format json $EXTRA_ARGS > "$RUNNER_TEMP/fix.json"; rc=$?
+        set -e
+        if [ "$rc" -gt 1 ]; then   # 0 = clean, 1 = findings remain; anything else is a failure
+          gh pr comment "$PR_NUMBER" --body "safe_sql AI fix failed (exit $rc). See the workflow log."
+          exit "$rc"
+        fi
+        git checkout -- safe_sql.yaml 2>/dev/null || true
         safe_sql github deliver --pr "$PR_NUMBER" --mode "$mode" --input "$RUNNER_TEMP/fix.json"
         safe_sql github react --comment-id "$COMMENT_ID" --content rocket
 

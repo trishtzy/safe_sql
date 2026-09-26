@@ -136,3 +136,24 @@ func TestNoConfigAtAll(t *testing.T) {
 		t.Error("empty starter")
 	}
 }
+
+func TestLoadAI(t *testing.T) {
+	dir := t.TempDir()
+	// A config that points at a sqlc.yaml which does not exist next to the
+	// extracted copy: LoadAI must not care.
+	write(t, filepath.Join(dir, "base.yaml"), "sqlc: sqlc.yaml\nschema: [db]\nai:\n  enabled: true\n  mode: suggest\n  allowed_associations: [OWNER]\n")
+	ai, err := LoadAI(filepath.Join(dir, "base.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ai.Enabled || ai.Mode != "suggest" || ai.Trigger != "@safe_sql_ai" || len(ai.AllowedAssociations) != 1 || ai.MaxIterations != 3 {
+		t.Errorf("ai = %+v", ai)
+	}
+	write(t, filepath.Join(dir, "bad.yaml"), "ai:\n  bogus: 1\n")
+	if _, err := LoadAI(filepath.Join(dir, "bad.yaml")); err == nil {
+		t.Error("expected unknown key error")
+	}
+	if ai, err := LoadAI(filepath.Join(dir, "missing.yaml")); err == nil || ai.Enabled {
+		t.Errorf("missing file: %v %+v", err, ai)
+	}
+}

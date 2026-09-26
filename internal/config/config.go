@@ -261,6 +261,26 @@ func load(dir, explicitConfig string, skipConfig bool) (*Project, error) {
 	return p, nil
 }
 
+// LoadAI reads only the `ai:` section of a safe_sql.yaml, with defaults
+// applied and strict keys, and no path resolution or sqlc discovery. The
+// GitHub Action uses it to gate a run on the base branch's settings, which
+// must never depend on where the file was extracted to.
+func LoadAI(path string) (AI, error) {
+	out := defaultAI()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return out, err
+	}
+	var f File
+	dec := yaml.NewDecoder(strings.NewReader(os.ExpandEnv(string(b))))
+	dec.KnownFields(true)
+	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
+		return out, fmt.Errorf("%s: %w", path, err)
+	}
+	mergeAI(&out, f.AI)
+	return out, nil
+}
+
 func defaultAI() AI {
 	t := true
 	return AI{

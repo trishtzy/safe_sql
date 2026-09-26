@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -26,11 +28,11 @@ func newGateCmd() *cobra.Command {
 		Use:   "gate",
 		Short: "Exit 0 if a PR comment may trigger the AI fix, using safe_sql.yaml from the base branch",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			proj, err := config.Load(".", baseConfig)
+			ai, err := config.LoadAI(baseConfig)
 			if err != nil {
 				return err
 			}
-			err = gh.Gate(gh.GateInput{Enabled: proj.AI.Enabled, Trigger: proj.AI.Trigger, AllowedAssociations: proj.AI.AllowedAssociations,
+			err = gh.Gate(gh.GateInput{Enabled: ai.Enabled, Trigger: ai.Trigger, AllowedAssociations: ai.AllowedAssociations,
 				CommentBody: body, AuthorAssociation: association, IsPullRequest: isPR})
 			if err != nil {
 				fmt.Fprintln(cmd.OutOrStdout(), "skip:", err)
@@ -53,11 +55,11 @@ func newModeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "mode", Short: "Print ai.mode from the given config",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			proj, err := config.Load(".", baseConfig)
+			ai, err := config.LoadAI(baseConfig)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), proj.AI.Mode)
+			fmt.Fprintln(cmd.OutOrStdout(), ai.Mode)
 			return nil
 		},
 	}
@@ -126,8 +128,11 @@ body), comment (one comment with the diffs). Always ends with a summary.`,
 			case mode == "suggest":
 				var comments []gh.ReviewComment
 				for _, p := range out.Modified {
-					before, err := os.ReadFile(p) // the checkout is still the PR head: original content
+					// fix already rewrote the working tree, so the original
+					// content must come from the PR head commit, not disk.
+					before, err := exec.Command("git", "show", "HEAD:"+filepath.ToSlash(p)).Output()
 					if err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "safe_sql: cannot read %s at HEAD: %v\n", p, err)
 						continue
 					}
 					for _, s := range fix.Suggestions(string(before), out.Files[p]) {
