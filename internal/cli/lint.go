@@ -14,12 +14,15 @@ import (
 	"github.com/trishtzy/safe_sql/internal/report"
 	"github.com/trishtzy/safe_sql/internal/rules"
 	"github.com/trishtzy/safe_sql/internal/sqlparse"
+	"github.com/trishtzy/safe_sql/internal/todo"
 )
 
 type lintFlags struct {
-	engine, tool, targetVersion, startAfter, format, pkg, changedSince string
-	checkDown, strict, dump                                            bool
-	disable, enable, only                                              []string
+	engine, tool, targetVersion, startAfter, format, pkg, changedSince, todoPath string
+	checkDown, strict, dump, noTodo, generateTodo                                bool
+	disable, enable, only                                                        []string
+	// todoFile is the resolved todo path, set by resolveRuns.
+	todoFile string
 }
 
 func newLintCmd(code *int, configPath *string) *cobra.Command {
@@ -34,9 +37,17 @@ markers) and reports operations that lock tables or break running code.
 With no paths, the schema paths come from safe_sql.yaml or, failing that,
 from sqlc.yaml (every supported sql[] package). Flags override both.
 
+Findings listed in the todo file (.safe_sql_todo.yaml next to safe_sql.yaml,
+or "todo:" in the config) are not reported. --generate-todo writes that file
+from the findings of this run, like RuboCop's --auto-gen-config, so an existing
+project can adopt safe_sql with a green build and fix the backlog over time.
+
 Exit codes: 0 clean, 1 findings (errors, or warnings with --strict), 2 usage
 or parse error.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if fl.generateTodo {
+				fl.noTodo = true // regenerate from scratch, not from what is already hidden
+			}
 			runs, err := resolveRuns(cmd, args, &fl, *configPath)
 			if err != nil {
 				return err
@@ -58,6 +69,10 @@ or parse error.`,
 				combined.Findings = append(combined.Findings, res.Findings...)
 				combined.Failures = append(combined.Failures, res.Failures...)
 				combined.Files = append(combined.Files, res.Files...)
+				combined.Suppressed += res.Suppressed
+			}
+			if fl.generateTodo {
+				return generateTodo(cmd, fl.todoFile, combined)
 			}
 			if err := report.Write(cmd.OutOrStdout(), combined, report.Format(fl.format)); err != nil {
 				return err
@@ -73,7 +88,41 @@ or parse error.`,
 	}
 	addLintFlags(cmd, &fl)
 	cmd.Flags().BoolVar(&fl.dump, "dump", false, "print the parsed statement model instead of linting")
+	cmd.Flags().BoolVar(&fl.generateTodo, "generate-todo", false, "write every current finding to the todo file (see --todo) and exit 0")
 	return cmd
+}
+
+// generateTodo writes the todo file for the findings of a run. Parse
+// failures cannot be baselined (there is no rule to list them under), so
+// they are still reported and keep the usage exit code.
+func generateTodo(cmd *cobra.Command, path string, res *lint.Result) error {
+	if len(res.Failures) > 0 {
+		for _, fl := range res.Failures {
+			fmt.Fprintf(cmd.ErrOrStderr(), "%s:%d: parse error: %s\n", fl.File, fl.Line, fl.Message)
+		}
+		return fmt.Errorf("%d file(s) failed to parse; fix them before generating the todo file", len(res.Failures))
+	}
+	entries := make([]todo.Entry, 0, len(res.Findings))
+	for _, f := range res.Findings {
+		entries = append(entries, todo.Entry{Rule: f.RuleID, File: f.File})
+	}
+	tf, err := todo.Build(path, entries)
+	if err != nil {
+		return err
+	}
+	if err := tf.Write(Version); err != nil {
+		return err
+	}
+	rel := path
+	if r, err := filepath.Rel(".", path); err == nil && !strings.HasPrefix(r, "..") {
+		rel = r
+	}
+	if tf.Empty() {
+		fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s: no findings to baseline in %d file(s).\n", rel, len(res.Files))
+		return nil
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s: %d finding(s) in %d file(s) are baselined and will not be reported.\nCommit it, fix entries over time, and regenerate with --generate-todo when the list drifts.\n", rel, tf.Len(), tf.Files())
+	return nil
 }
 
 func addLintFlags(cmd *cobra.Command, fl *lintFlags) {
@@ -90,6 +139,8 @@ func addLintFlags(cmd *cobra.Command, fl *lintFlags) {
 	f.StringSliceVar(&fl.enable, "enable", nil, "opt-in rule IDs to enable (adds to config)")
 	f.StringSliceVar(&fl.only, "only", nil, "run only these rule IDs")
 	f.StringVar(&fl.changedSince, "changed-since", "", "only report files added or modified since this git ref (all files still build the schema model)")
+	f.StringVar(&fl.todoPath, "todo", "", "todo file of baselined findings (default: todo: in config, else "+todo.DefaultName+" next to safe_sql.yaml)")
+	f.BoolVar(&fl.noTodo, "no-todo", false, "ignore the todo file and report every finding")
 }
 
 // lintRun is one lint invocation: an engine and its paths.
@@ -140,6 +191,18 @@ func resolveRuns(cmd *cobra.Command, args []string, fl *lintFlags, configPath st
 			return nil, err
 		}
 		base.ReportOnly = changed
+	}
+
+	fl.todoFile = proj.TodoPath
+	if fl.todoPath != "" {
+		fl.todoFile = fl.todoPath
+	}
+	if !fl.noTodo {
+		tf, err := todo.Load(fl.todoFile)
+		if err != nil {
+			return nil, err
+		}
+		base.Todo = tf
 	}
 
 	if len(args) > 0 {

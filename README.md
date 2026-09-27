@@ -132,6 +132,38 @@ Rules can also be disabled project-wide in `safe_sql.yaml`, and `start_after`
 trusts every migration up to the one you were already running in production
 when you adopted safe_sql.
 
+### Adopting safe_sql on an existing project: the todo file
+
+Like RuboCop's `.rubocop_todo.yml`, safe_sql can baseline the findings that
+already exist so the build is green from day one and the backlog is fixed
+over time:
+
+```sh
+safe_sql lint --generate-todo   # writes .safe_sql_todo.yaml next to safe_sql.yaml
+git add .safe_sql_todo.yaml
+```
+
+The file lists, per rule and file, how many findings are known:
+
+```yaml
+ban-drop-column:
+  db/migrations/0002_cleanup.sql: 1
+require-concurrent-index-creation:
+  db/migrations/0007_indexes.sql: 2
+```
+
+`lint`, `verify` and `fix` load it automatically and skip those findings
+(the summary says how many were suppressed). Only the listed *count* is
+skipped: a baselined file that gains another `DROP COLUMN` is still reported.
+Paths are relative to the todo file, so it works in CI checkouts. Delete
+entries as you fix them, regenerate with `--generate-todo` when the list
+drifts, and pass `--no-todo` to see everything. Set `todo:` in `safe_sql.yaml`
+or `--todo <path>` to keep the file elsewhere.
+
+Compared with `start_after`, which trusts every migration up to a version, the
+todo file is per finding, so new mistakes in old files, and old files never
+covered, still surface.
+
 ## Configuration
 
 Configuration is optional. Put a `safe_sql.yaml` next to (or above) your
@@ -149,6 +181,7 @@ sqlc: sqlc.yaml            # default: auto-discovered upward from the working di
 migration_tool: auto       # auto | plain | goose | golang-migrate | dbmate | tern | sql-migrate | atlas
 target_version: "16"       # production Postgres major (or SQLite version, e.g. "3.45")
 start_after: "20260101000000"
+todo: .safe_sql_todo.yaml   # baseline from `safe_sql lint --generate-todo`; this is the default location
 check_down: false
 plain_in_transaction: true # assumption for files whose tool cannot be detected
 rules:

@@ -19,6 +19,7 @@ import (
 	"github.com/trishtzy/safe_sql/internal/migrate"
 	"github.com/trishtzy/safe_sql/internal/rules"
 	"github.com/trishtzy/safe_sql/internal/sqlparse"
+	"github.com/trishtzy/safe_sql/internal/todo"
 )
 
 // FileNames are the config files looked for, in order, in each directory
@@ -38,7 +39,10 @@ type File struct {
 	MigrationTool string `yaml:"migration_tool"`
 	TargetVersion string `yaml:"target_version"`
 	StartAfter    string `yaml:"start_after"`
-	CheckDown     bool   `yaml:"check_down"`
+	// Todo is the baseline file of known findings (default
+	// .safe_sql_todo.yaml next to this file). See internal/todo.
+	Todo      string `yaml:"todo"`
+	CheckDown bool   `yaml:"check_down"`
 	// PlainInTransaction is the transaction assumption for files whose tool
 	// cannot be detected (nil = true).
 	PlainInTransaction *bool  `yaml:"plain_in_transaction"`
@@ -135,9 +139,11 @@ type Project struct {
 	// Skipped lists sqlc packages whose engine safe_sql does not support.
 	Skipped []string
 
-	Tool               migrate.Tool
-	TargetVersion      rules.Version
-	StartAfter         string
+	Tool          migrate.Tool
+	TargetVersion rules.Version
+	StartAfter    string
+	// TodoPath is the resolved todo file path; it need not exist.
+	TodoPath           string
 	CheckDown          bool
 	PlainInTransaction bool
 	Disabled, Enabled  []string
@@ -239,6 +245,10 @@ func load(dir, explicitConfig string, skipConfig bool) (*Project, error) {
 	}
 	p.TargetVersion = v
 	p.StartAfter = f.StartAfter
+	p.TodoPath = resolve(cfgDir, todo.DefaultName)
+	if f.Todo != "" {
+		p.TodoPath = resolve(cfgDir, f.Todo)
+	}
 	p.CheckDown = f.CheckDown
 	if f.PlainInTransaction != nil {
 		p.PlainInTransaction = *f.PlainInTransaction
@@ -468,6 +478,11 @@ migration_tool: auto
 # Migrations at or before this version prefix are trusted (they still feed the
 # schema model). Set to your latest deployed migration when adopting safe_sql.
 # start_after: "20260101000000"
+
+# Baseline of findings that existed when safe_sql was adopted, written by
+# "safe_sql lint --generate-todo" (like RuboCop's .rubocop_todo.yml). Listed
+# findings are not reported; fix and remove them over time.
+# todo: .safe_sql_todo.yaml
 
 # Files whose migration tool cannot be detected are assumed to run in a
 # transaction. Set to false for plain schema dumps.

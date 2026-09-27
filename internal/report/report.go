@@ -54,11 +54,19 @@ func writeHuman(w io.Writer, res *lint.Result) error {
 		fmt.Fprintf(w, "  To skip this check once it is safe, add the line\n    -- safe_sql:disable %s\n  directly above the statement.\n\n", f.RuleID)
 	}
 	if len(res.Findings) == 0 && len(res.Failures) == 0 {
-		fmt.Fprintf(w, "No unsafe operations found in %d file(s).\n", len(res.Files))
+		fmt.Fprintf(w, "No unsafe operations found in %d file(s).%s\n", len(res.Files), suppressedNote(res))
 		return nil
 	}
-	fmt.Fprintln(w, res.Summary())
+	fmt.Fprintln(w, res.Summary()+suppressedNote(res))
 	return nil
+}
+
+// suppressedNote mentions findings hidden by the todo file, if any.
+func suppressedNote(res *lint.Result) string {
+	if res.Suppressed == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d known finding(s) suppressed by the todo file)", res.Suppressed)
 }
 
 func header(s rules.Severity) string {
@@ -95,9 +103,10 @@ type jsonOut struct {
 	Findings []jsonFinding  `json:"findings"`
 	Failures []lint.Failure `json:"parse_failures"`
 	Summary  struct {
-		Errors   int `json:"errors"`
-		Warnings int `json:"warnings"`
-		Files    int `json:"files"`
+		Errors     int `json:"errors"`
+		Warnings   int `json:"warnings"`
+		Files      int `json:"files"`
+		Suppressed int `json:"suppressed,omitempty"`
 	} `json:"summary"`
 }
 
@@ -113,6 +122,7 @@ func writeJSON(w io.Writer, res *lint.Result) error {
 		})
 	}
 	out.Summary.Errors, out.Summary.Warnings, out.Summary.Files = res.Errors(), res.Warnings(), len(res.Files)
+	out.Summary.Suppressed = res.Suppressed
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)

@@ -456,6 +456,7 @@ All seven phases are implemented and committed on `main`:
 | 5 distribution | done; goreleaser, Action, pre-commit, Dockerfile, CI + release workflows, README |
 | 6 fix + AI + PR flow | done; deterministic fixers, Claude-backed proposals with validation, `github` delivery subcommands, `mode: ai-fix` in the Action |
 | 7 SQLite | done; 7 SQLite-specific rules + common rules, verify support |
+| todo file (added 2026-09-28) | done; `lint --generate-todo` writes `.safe_sql_todo.yaml` (rule -> file -> count, RuboCop-todo style); lint/verify/fix honour it, `--no-todo` / `--todo` / `todo:` override |
 
 Not yet done (needs the repository to be published):
 - Tag `v1.0.0` and `v1` so `uses: trishtzy/safe_sql@v1` and the release

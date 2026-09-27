@@ -1,0 +1,264 @@
+// Package todo reads and writes the safe_sql todo file: a baseline of the
+// findings that existed when safe_sql was adopted, so they stop failing the
+// build without touching the migrations themselves.
+//
+// The idea comes from RuboCop's .rubocop_todo.yml. strong_migrations has no
+// equivalent; its start_after option trusts every migration up to a version,
+// which safe_sql also supports. A todo file is finer-grained: it lists, per
+// rule and file, how many findings are known. The first N findings of that
+// rule in that file are suppressed and any extra ones are still reported, so
+// a baselined file cannot quietly grow new problems.
+//
+// File shape (paths are relative to the file's directory, like every other
+// path in safe_sql.yaml):
+//
+//	ban-drop-column:
+//	  db/migrations/0002_unsafe.sql: 1
+//	require-concurrent-index-creation:
+//	  db/migrations/0003_index.sql: 2
+package todo
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+// DefaultName is the file looked for next to safe_sql.yaml (or in the
+// working directory when there is no config file).
+const DefaultName = ".safe_sql_todo.yaml"
+
+// File is a loaded todo file.
+type File struct {
+	// Path is where the file was read from or will be written.
+	Path string
+	// counts is rule -> absolute file path -> number of known findings.
+	counts map[string]map[string]int
+}
+
+// Entry identifies one finding for Build.
+type Entry struct {
+	Rule string
+	File string
+}
+
+// Load reads the todo file at path. A missing file is not an error: the
+// returned File suppresses nothing (and Empty reports true).
+func Load(path string) (*File, error) {
+	f := &File{Path: path, counts: map[string]map[string]int{}}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return f, nil
+		}
+		return nil, err
+	}
+	var raw map[string]map[string]int
+	if err := yaml.Unmarshal(b, &raw); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	dir, err := todoDir(path)
+	if err != nil {
+		return nil, err
+	}
+	for rule, files := range raw {
+		for rel, n := range files {
+			if n <= 0 {
+				continue
+			}
+			abs := rel
+			if !filepath.IsAbs(abs) {
+				abs = filepath.Join(dir, abs)
+			}
+			abs, err = canon(abs)
+			if err != nil {
+				return nil, err
+			}
+			if f.counts[rule] == nil {
+				f.counts[rule] = map[string]int{}
+			}
+			f.counts[rule][abs] += n
+		}
+	}
+	return f, nil
+}
+
+// Build creates a todo file at path covering every entry. Entries for the
+// same rule and file are counted.
+func Build(path string, entries []Entry) (*File, error) {
+	f := &File{Path: path, counts: map[string]map[string]int{}}
+	for _, e := range entries {
+		abs, err := canon(e.File)
+		if err != nil {
+			return nil, err
+		}
+		if f.counts[e.Rule] == nil {
+			f.counts[e.Rule] = map[string]int{}
+		}
+		f.counts[e.Rule][abs]++
+	}
+	return f, nil
+}
+
+// Empty reports whether the file suppresses nothing.
+func (f *File) Empty() bool { return f == nil || len(f.counts) == 0 }
+
+// Len returns the number of findings the file suppresses.
+func (f *File) Len() int {
+	if f == nil {
+		return 0
+	}
+	n := 0
+	for _, files := range f.counts {
+		for _, c := range files {
+			n += c
+		}
+	}
+	return n
+}
+
+// Files returns the number of distinct files with entries.
+func (f *File) Files() int {
+	if f == nil {
+		return 0
+	}
+	seen := map[string]bool{}
+	for _, files := range f.counts {
+		for p := range files {
+			seen[p] = true
+		}
+	}
+	return len(seen)
+}
+
+// Filter answers, for one lint run, whether each finding is suppressed. It
+// carries its own counters so a File can be shared by several runs.
+type Filter struct {
+	file *File
+	seen map[string]map[string]int
+}
+
+// NewFilter starts counting against f. A nil f suppresses nothing.
+func (f *File) NewFilter() *Filter {
+	return &Filter{file: f, seen: map[string]map[string]int{}}
+}
+
+// Suppress reports whether the finding of rule in file (as the linter names
+// it) is within the file's known count. Call it once per finding, in the
+// order findings are reported.
+func (fl *Filter) Suppress(rule, file string) bool {
+	if fl == nil || fl.file.Empty() {
+		return false
+	}
+	files := fl.file.counts[rule]
+	if files == nil {
+		return false
+	}
+	abs, err := canon(file)
+	if err != nil {
+		return false
+	}
+	limit, ok := files[abs]
+	if !ok {
+		return false
+	}
+	if fl.seen[rule] == nil {
+		fl.seen[rule] = map[string]int{}
+	}
+	if fl.seen[rule][abs] >= limit {
+		return false
+	}
+	fl.seen[rule][abs]++
+	return true
+}
+
+// Write renders the file to disk. Paths are written relative to the file's
+// directory. An empty File still writes a header-only file so that
+// regenerating after fixing everything leaves an obviously empty baseline.
+func (f *File) Write(version string) error {
+	dir, err := todoDir(f.Path)
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "# safe_sql todo file, generated by `safe_sql lint --generate-todo` on %s (safe_sql %s).\n", time.Now().Format("2006-01-02"), version)
+	b.WriteString(`# Findings listed here existed when safe_sql was adopted and are not reported,
+# so the build stays green while they are fixed over time. Each entry is
+# rule -> file -> number of known findings; a file with more findings of that
+# rule than its count still reports the extra ones. Delete entries as you fix
+# them, or regenerate this file with --generate-todo.
+`)
+	rules := make([]string, 0, len(f.counts))
+	for r := range f.counts {
+		rules = append(rules, r)
+	}
+	sort.Strings(rules)
+	for _, r := range rules {
+		files := f.counts[r]
+		paths := make([]string, 0, len(files))
+		for p := range files {
+			paths = append(paths, p)
+		}
+		sort.Strings(paths)
+		fmt.Fprintf(&b, "%s:\n", r)
+		for _, p := range paths {
+			// Always relative when possible, even via "..": CI checks the
+			// repository out at a different absolute path.
+			rel := p
+			if r, err := filepath.Rel(dir, p); err == nil {
+				rel = r
+			}
+			fmt.Fprintf(&b, "  %s: %d\n", quote(filepath.ToSlash(rel)), files[p])
+		}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(f.Path, []byte(b.String()), 0o644)
+}
+
+// todoDir is the canonical directory of a todo file path.
+func todoDir(path string) (string, error) {
+	abs, err := canon(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(abs), nil
+}
+
+// canon makes p absolute and resolves symlinks, so a path named relative to
+// the working directory and the same path named relative to the todo file
+// compare equal (macOS puts temp dirs behind /var -> /private/var, and
+// os.Getwd resolves that while config paths do not). Components that do not
+// exist yet are kept as given.
+func canon(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	var tail []string
+	for cur := abs; ; {
+		if r, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(append([]string{r}, tail...)...), nil
+		}
+		parent, base := filepath.Dir(cur), filepath.Base(cur)
+		if parent == cur {
+			return abs, nil
+		}
+		tail = append([]string{base}, tail...)
+		cur = parent
+	}
+}
+
+// quote wraps a YAML key when it would not survive plain scalar parsing.
+func quote(s string) string {
+	if strings.ContainsAny(s, ":#{}[],&*!|>'\"%@`") || strings.HasPrefix(s, " ") || strings.HasPrefix(s, "-") || strings.HasPrefix(s, "?") {
+		return fmt.Sprintf("%q", s)
+	}
+	return s
+}
