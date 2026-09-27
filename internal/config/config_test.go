@@ -157,3 +157,31 @@ func TestLoadAI(t *testing.T) {
 		t.Errorf("missing file: %v %+v", err, ai)
 	}
 }
+
+func TestTodoPath(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "safe_sql.yaml"), "version: \"1\"\nengine: postgresql\nschema: [m]\n")
+	p, err := Load(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, ".safe_sql_todo.yaml"); p.TodoPath != want {
+		t.Errorf("default TodoPath = %s, want %s", p.TodoPath, want)
+	}
+	write(t, filepath.Join(dir, "safe_sql.yaml"), "version: \"1\"\nengine: postgresql\nschema: [m]\ntodo: ci/known.yaml\n")
+	p, err = Load(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "ci", "known.yaml"); p.TodoPath != want {
+		t.Errorf("TodoPath = %s, want %s", p.TodoPath, want)
+	}
+	// No config file at all: the todo file lives in the working directory.
+	p, err = Load(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.TodoPath != ".safe_sql_todo.yaml" && !filepath.IsAbs(p.TodoPath) {
+		t.Errorf("TodoPath without config = %s", p.TodoPath)
+	}
+}

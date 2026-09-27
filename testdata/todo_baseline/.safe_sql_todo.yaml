@@ -1,0 +1,6 @@
+# Baseline: the json column and ONE of the two column drops are known. The
+# second drop and the non-concurrent index must still be reported.
+prefer-jsonb:
+  migrations/0001_init.sql: 1
+ban-drop-column:
+  migrations/0002_cleanup.sql: 1

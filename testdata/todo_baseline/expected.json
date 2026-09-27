@@ -1,0 +1,29 @@
+{
+  "findings": [
+    {
+      "file": "migrations/0002_cleanup.sql",
+      "line": 2,
+      "rule": "ban-drop-column",
+      "severity": "error",
+      "message": "dropping column users.nick",
+      "guidance": "Running application code (and ORM/sqlc-generated code with cached column lists)\nstill references the column and fails once it is gone.\n\nSafe sequence:\n  1. Remove every read and write of the column from the application and deploy.\n  2. Then, in a later migration, drop the column:\n\n     ALTER TABLE users DROP COLUMN name;\n\nIf the column is already unused, add \"-- safe_sql:disable ban-drop-column\"\nabove the statement to acknowledge this.",
+      "statement": "ALTER TABLE users DROP COLUMN nick"
+    },
+    {
+      "file": "migrations/0002_cleanup.sql",
+      "line": 3,
+      "rule": "require-concurrent-index-creation",
+      "severity": "error",
+      "message": "creating index posts_user_id_idx on posts without CONCURRENTLY",
+      "guidance": "CREATE INDEX takes a SHARE lock on the table, blocking writes until the index\nis built. Build it concurrently instead:\n\n  CREATE INDEX CONCURRENTLY idx_users_email ON users (email);\n\nCONCURRENTLY cannot run inside a transaction, so the migration file must opt\nout of the tool's transaction wrapper (see concurrent-index-in-transaction).\nNote that a concurrent build that fails leaves an INVALID index behind that\nmust be dropped before retrying.",
+      "statement": "CREATE INDEX posts_user_id_idx ON posts (user_id)"
+    }
+  ],
+  "parse_failures": [],
+  "summary": {
+    "errors": 2,
+    "warnings": 0,
+    "files": 2,
+    "suppressed": 2
+  }
+}

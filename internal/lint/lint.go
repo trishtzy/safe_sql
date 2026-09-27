@@ -11,6 +11,7 @@ import (
 	"github.com/trishtzy/safe_sql/internal/migrate"
 	"github.com/trishtzy/safe_sql/internal/rules"
 	"github.com/trishtzy/safe_sql/internal/sqlparse"
+	"github.com/trishtzy/safe_sql/internal/todo"
 )
 
 // Options controls a lint run.
@@ -32,6 +33,9 @@ type Options struct {
 	Enabled    []string
 	Only       []string
 	Severity   map[string]rules.Severity
+	// Todo is the baseline of known findings; those within its counts are
+	// dropped from Findings and counted in Result.Suppressed. nil means none.
+	Todo *todo.File
 }
 
 // Finding is a rule finding located in a file.
@@ -56,6 +60,8 @@ type Result struct {
 	Findings []Finding
 	Failures []Failure
 	Files    []*migrate.File
+	// Suppressed counts findings dropped because the todo file lists them.
+	Suppressed int
 }
 
 // Errors counts error-severity findings.
@@ -128,6 +134,20 @@ func RunFiles(files []*migrate.File, opts Options) (*Result, error) {
 		}
 		return res.Findings[i].Line < res.Findings[j].Line
 	})
+	if !opts.Todo.Empty() {
+		// A fresh filter per run: callers reuse Options across several runs
+		// (fix lints before and after), so counters must not persist.
+		filter := opts.Todo.NewFilter()
+		kept := res.Findings[:0]
+		for _, f := range res.Findings {
+			if filter.Suppress(f.RuleID, f.File) {
+				res.Suppressed++
+				continue
+			}
+			kept = append(kept, f)
+		}
+		res.Findings = kept
+	}
 	return res, nil
 }
 

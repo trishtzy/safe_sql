@@ -98,3 +98,65 @@ func TestInitAndRulesCommands(t *testing.T) {
 		t.Errorf("lint with missing schema dir: %d %s", code, errb.String())
 	}
 }
+
+func TestGenerateTodo(t *testing.T) {
+	src, _ := filepath.Abs(filepath.Join("..", "..", "testdata", "goose_basic", "migrations"))
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "db", "migrations"), 0o755)
+	entries, _ := os.ReadDir(src)
+	for _, e := range entries {
+		b, _ := os.ReadFile(filepath.Join(src, e.Name()))
+		os.WriteFile(filepath.Join(dir, "db", "migrations", e.Name()), b, 0o644)
+	}
+	os.WriteFile(filepath.Join(dir, "safe_sql.yaml"), []byte("version: \"1\"\nengine: postgresql\nschema: [db/migrations]\n"), 0o644)
+	wd, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(wd)
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"lint"}, &out, &errb); code != 1 {
+		t.Fatalf("lint before baseline: %d %s%s", code, out.String(), errb.String())
+	}
+	out.Reset()
+	if code := Run([]string{"lint", "--generate-todo"}, &out, &errb); code != 0 || !strings.Contains(out.String(), "Wrote .safe_sql_todo.yaml: 6 finding(s) in 2 file(s)") {
+		t.Fatalf("generate: %d %s%s", code, out.String(), errb.String())
+	}
+	b, err := os.ReadFile(".safe_sql_todo.yaml")
+	if err != nil || !strings.Contains(string(b), "ban-drop-column:\n  db/migrations/0002_unsafe.sql: 1\n") {
+		t.Errorf("todo file: %v\n%s", err, b)
+	}
+	out.Reset()
+	if code := Run([]string{"lint"}, &out, &errb); code != 0 || !strings.Contains(out.String(), "No unsafe operations found in 3 file(s). (6 known finding(s) suppressed by the todo file)") {
+		t.Errorf("lint after baseline: %d %s%s", code, out.String(), errb.String())
+	}
+	out.Reset()
+	if code := Run([]string{"lint", "--no-todo"}, &out, &errb); code != 1 {
+		t.Errorf("--no-todo should report again: %d", code)
+	}
+	// verify and fix share the flag; fix must not rewrite baselined migrations.
+	out.Reset()
+	if code := Run([]string{"fix", "--dry-run", "--format", "json"}, &out, &errb); code != 0 || strings.Contains(out.String(), "0002_unsafe") || !strings.Contains(out.String(), `"remaining_findings": 0`) {
+		t.Errorf("fix with baseline: %d %s%s", code, out.String(), errb.String())
+	}
+	out.Reset()
+	if code := Run([]string{"fix", "--dry-run", "--no-todo", "--format", "json"}, &out, &errb); code != 1 || !strings.Contains(out.String(), "0002_unsafe") {
+		t.Errorf("fix --no-todo should propose changes: %d %s%s", code, out.String(), errb.String())
+	}
+	// Regenerating starts from scratch: the same six entries, not zero.
+	out.Reset()
+	if code := Run([]string{"lint", "--generate-todo"}, &out, &errb); code != 0 || !strings.Contains(out.String(), "6 finding(s)") {
+		t.Errorf("regenerate: %d %s%s", code, out.String(), errb.String())
+	}
+	// A custom location via --todo; a config `todo:` key is covered in config tests.
+	out.Reset()
+	if code := Run([]string{"lint", "--generate-todo", "--todo", "ci/baseline.yaml"}, &out, &errb); code != 0 {
+		t.Errorf("custom path: %d %s%s", code, out.String(), errb.String())
+	}
+	if b, err := os.ReadFile("ci/baseline.yaml"); err != nil || !strings.Contains(string(b), "  ../db/migrations/0002_unsafe.sql: 1\n") {
+		t.Errorf("custom path file: %v\n%s", err, b)
+	}
+	out.Reset()
+	if code := Run([]string{"lint", "--todo", "ci/baseline.yaml"}, &out, &errb); code != 0 {
+		t.Errorf("lint with custom todo: %d %s%s", code, out.String(), errb.String())
+	}
+}
